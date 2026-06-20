@@ -13,3 +13,5 @@ venv/
 # ── Logs & screenshots ────────────────────────────────
 logs/
 *.png
+
+*copy.py

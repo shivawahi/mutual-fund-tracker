@@ -1,0 +1,78 @@
+name: Mutual Fund Tracker
+
+on:
+  # Runs Mon–Fri at 40:30 UTC = 10:00 AM IST
+  schedule:
+    - cron: '30 4 * * 1-5'
+
+  # Manual trigger from GitHub UI with optional date
+  workflow_dispatch:
+    inputs:
+      date:
+        description: 'Optional date DD/MM/YYYY (leave blank for today)'
+        required: false
+        default: ''
+
+jobs:
+  run-tracker:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Cache pip packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
+
+      - name: Install Python dependencies
+        run: |
+          pip install -r requirements.txt
+          playwright install chromium
+          playwright install-deps chromium
+
+      - name: Create .env from secrets
+        run: |
+          echo "LOGIN_URL=${{ secrets.LOGIN_URL }}"                     >> .env
+          echo "INVESTMENT_USERNAME=${{ secrets.INVESTMENT_USERNAME }}" >> .env
+          echo "INVESTMENT_PASSWORD=${{ secrets.INVESTMENT_PASSWORD }}" >> .env
+          echo "GOOGLE_SHEETS_ID=${{ secrets.GOOGLE_SHEETS_ID }}"      >> .env
+          echo "SERVICE_ACCOUNT_FILE=service_account.json"             >> .env
+
+      - name: Create service account JSON from secret
+        run: |
+          echo '${{ secrets.SERVICE_ACCOUNT_JSON }}' > service_account.json
+
+      - name: Run tracker
+        run: |
+          if [ -n "${{ github.event.inputs.date }}" ]; then
+            python tracker.py --date "${{ github.event.inputs.date }}"
+          else
+            python tracker.py
+          fi
+
+      - name: Fix chart color if new sheet was created
+        run: |
+          if [ -f "new_sheet_created.flag" ]; then
+            MONTH=$(cat new_sheet_created.flag)
+            echo "New sheet detected: $MONTH"
+            python fix_chart_color.py "$MONTH"
+            rm new_sheet_created.flag
+          else
+            echo "No new sheet created — skipping fix_chart_color.py"
+          fi
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tracker-logs-${{ github.run_number }}
+          path: logs/
+          retention-days: 30
