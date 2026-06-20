@@ -1,7 +1,7 @@
 name: Mutual Fund Tracker
 
 on:
-  # Runs Mon–Fri at 40:30 UTC = 10:00 AM IST
+  # Runs Mon–Fri at 4:30 AM UTC = 10:00 AM IST
   schedule:
     - cron: "30 4 * * 1-5"
 
@@ -40,11 +40,11 @@ jobs:
 
       - name: Create .env from secrets
         run: |
-          echo "LOGIN_URL=${{ secrets.LOGIN_URL }}"                     >> .env
-          echo "INVESTMENT_USERNAME=${{ secrets.INVESTMENT_USERNAME }}" >> .env
-          echo "INVESTMENT_PASSWORD=${{ secrets.INVESTMENT_PASSWORD }}" >> .env
-          echo "GOOGLE_SHEETS_ID=${{ secrets.GOOGLE_SHEETS_ID }}"      >> .env
-          echo "SERVICE_ACCOUNT_FILE=service_account.json"             >> .env
+          echo "LOGIN_URL=${{ secrets.LOGIN_URL }}"                         >> .env
+          echo "INVESTMENT_USERNAME=${{ secrets.INVESTMENT_USERNAME }}"     >> .env
+          echo "INVESTMENT_PASSWORD=${{ secrets.INVESTMENT_PASSWORD }}"     >> .env
+          echo "GOOGLE_SHEETS_ID=${{ secrets.GOOGLE_SHEETS_ID }}"          >> .env
+          echo "SERVICE_ACCOUNT_FILE=service_account.json"                 >> .env
 
       - name: Create service account JSON from secret
         run: |
@@ -69,6 +69,21 @@ jobs:
             echo "No new sheet created — skipping fix_chart_color.py"
           fi
 
+      - name: Read tracker log
+        if: always()
+        id: read_log
+        run: |
+          if [ -f "logs/tracker.log" ]; then
+            # Get last 50 lines of log to keep email concise
+            LOG=$(tail -50 logs/tracker.log)
+          else
+            LOG="No log file found."
+          fi
+          # Save to env (multiline safe)
+          echo "LOG_CONTENT<<EOF" >> $GITHUB_ENV
+          echo "$LOG"             >> $GITHUB_ENV
+          echo "EOF"              >> $GITHUB_ENV
+
       - name: Upload logs
         if: always()
         uses: actions/upload-artifact@v4.6.2
@@ -76,3 +91,32 @@ jobs:
           name: tracker-logs-${{ github.run_number }}
           path: logs/
           retention-days: 30
+
+      - name: Send email notification
+        if: always()
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 465
+          secure: true
+          username: ${{ secrets.EMAIL_USERNAME }}
+          password: ${{ secrets.EMAIL_APP_PASSWORD }}
+          to: ${{ secrets.EMAIL_TO }}
+          from: Mutual Fund Tracker <${{ secrets.EMAIL_USERNAME }}>
+          subject: "${{ job.status == 'success' && '✅' || '❌' }} Finance First Mutual Fund Tracker — ${{ job.status }} (Run ${{ github.run_number }})"
+          body: |
+            Finance First Mutual Fund Tracker — Daily Execution Report
+            ═══════════════════════════════════════════════
+
+            Status     : ${{ job.status == 'success' && '✅ SUCCESS' || '❌ FAILED' }}
+            Run Number : ${{ github.run_number }}
+            Triggered  : ${{ github.event_name }}
+            Date param : ${{ github.event.inputs.date || 'today' }}
+            Run URL    : https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+            ── TRACKER LOG (last 50 lines) ──────────────────────
+            ${{ env.LOG_CONTENT }}
+            ─────────────────────────────────────────────────────
+
+            Full logs + artifacts:
+            https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
